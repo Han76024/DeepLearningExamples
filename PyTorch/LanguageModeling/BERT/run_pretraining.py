@@ -643,6 +643,7 @@ def main():
                                      next_sentence_labels=next_sentence_labels)
                         unscaled_loss = loss.item()
                         model.backward(loss)
+                        model.step()
                     else:
 
                         prediction_scores, seq_relationship_score = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
@@ -664,8 +665,6 @@ def main():
 
                     if training_steps % args.gradient_accumulation_steps == 0:
                         if args.deepspeed:
-                            # TODO handle lr_scheduler
-                            model.step()
                             global_step += 1
                         else:
                             lr_scheduler.step()  # learning rate warmup
