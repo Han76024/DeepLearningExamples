@@ -1,5 +1,6 @@
 import os
 
+
 def set_environment_variables_for_nccl_backend(master_port=6105, verbose=True):
     # setting env variables for multi node runs in AML
     # will hit KeyError Exception when running with single node in AML
@@ -32,6 +33,12 @@ def set_environment_variables_for_nccl_backend(master_port=6105, verbose=True):
             "NCCL_SOCKET_IFNAME new value = {}".format(os.environ["NCCL_SOCKET_IFNAME"])
         )
         print(f"NCCL_IB_DISABLE = {os.environ['NCCL_IB_DISABLE']}")
+
+
+def update_args_from_aml_env(args):
+    args.local_rank = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK']) if 'OMPI_COMM_WORLD_LOCAL_RANK' in os.environ else 0
+    args.global_rank = int(os.environ['OMPI_COMM_WORLD_RANK']) if 'OMPI_COMM_WORLD_LOCAL_RANK' in os.environ else 0
+    args.world_size = int(os.environ['OMPI_COMM_WORLD_SIZE']) if 'OMPI_COMM_WORLD_LOCAL_RANK' in os.environ else 1
 
 
 def get_rank():

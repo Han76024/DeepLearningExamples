@@ -35,6 +35,8 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
 from apex import amp
+
+from aml_mpienv import update_args_from_aml_env, get_world_size, set_environment_variables_for_nccl_backend
 from schedulers import LinearWarmUpScheduler
 from file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 import modeling
@@ -423,19 +425,19 @@ RawResult = collections.namedtuple("RawResult",
 
 
 def get_answers(examples, features, results, args):
-    predictions = collections.defaultdict(list) #it is possible that one example corresponds to multiple features
+    predictions = collections.defaultdict(list)  # it is possible that one example corresponds to multiple features
     Prediction = collections.namedtuple('Prediction', ['text', 'start_logit', 'end_logit'])
 
     if args.version_2_with_negative:
-        null_vals = collections.defaultdict(lambda: (float("inf"),0,0))
+        null_vals = collections.defaultdict(lambda: (float("inf"), 0, 0))
     for ex, feat, result in match_results(examples, features, results):
         start_indices = _get_best_indices(result.start_logits, args.n_best_size)
         end_indices = _get_best_indices(result.end_logits, args.n_best_size)
         prelim_predictions = get_valid_prelim_predictions(start_indices, end_indices, feat, result, args)
         prelim_predictions = sorted(
-                            prelim_predictions,
-                            key=lambda x: (x.start_logit + x.end_logit),
-                            reverse=True)
+            prelim_predictions,
+            key=lambda x: (x.start_logit + x.end_logit),
+            reverse=True)
         if args.version_2_with_negative:
             score = result.start_logits[0] + result.end_logits[0]
             if score < null_vals[ex.qas_id][0]:
@@ -457,25 +459,24 @@ def get_answers(examples, features, results, args):
             curr_predictions.append(Prediction(final_text, pred.start_logit, pred.end_logit))
         predictions[ex.qas_id] += curr_predictions
 
-    #Add empty prediction
+    # Add empty prediction
     if args.version_2_with_negative:
         for qas_id in predictions.keys():
             predictions[qas_id].append(Prediction('',
                                                   null_vals[ex.qas_id][1],
                                                   null_vals[ex.qas_id][2]))
 
-
     nbest_answers = collections.defaultdict(list)
     answers = {}
     for qas_id, preds in predictions.items():
         nbest = sorted(
-                preds,
-                key=lambda x: (x.start_logit + x.end_logit),
-                reverse=True)[:args.n_best_size]
+            preds,
+            key=lambda x: (x.start_logit + x.end_logit),
+            reverse=True)[:args.n_best_size]
 
         # In very rare edge cases we could only have single null prediction.
         # So we just create a nonce prediction in this case to avoid failure.
-        if not nbest:                                                    
+        if not nbest:
             nbest.append(Prediction(text="empty", start_logit=0.0, end_logit=0.0))
 
         total_scores = []
@@ -503,6 +504,7 @@ def get_answers(examples, features, results, args):
 
     return answers, nbest_answers
 
+
 def get_answer_text(example, feature, pred, args):
     tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
     orig_doc_start = feature.token_to_orig_map[pred.start_index]
@@ -522,8 +524,8 @@ def get_answer_text(example, feature, pred, args):
     final_text = get_final_text(tok_text, orig_text, args.do_lower_case, args.verbose_logging)
     return final_text
 
+
 def get_valid_prelim_predictions(start_indices, end_indices, feature, result, args):
-    
     _PrelimPrediction = collections.namedtuple(
         "PrelimPrediction",
         ["start_index", "end_index", "start_logit", "end_logit"])
@@ -553,6 +555,7 @@ def get_valid_prelim_predictions(start_indices, end_indices, feature, result, ar
                     end_logit=result.end_logits[end_index]))
     return prelim_predictions
 
+
 def match_results(examples, features, results):
     unique_f_ids = set([f.unique_id for f in features])
     unique_r_ids = set([r.unique_id for r in results])
@@ -562,8 +565,9 @@ def match_results(examples, features, results):
     features.sort(key=lambda x: x.unique_id)
     results.sort(key=lambda x: x.unique_id)
 
-    for f, r in zip(features, results): #original code assumes strict ordering of examples. TODO: rewrite this
+    for f, r in zip(features, results):  # original code assumes strict ordering of examples. TODO: rewrite this
         yield examples[f.example_index], f, r
+
 
 def get_final_text(pred_text, orig_text, do_lower_case, verbose_logging=False):
     """Project the tokenized prediction back to the original text."""
@@ -697,12 +701,14 @@ def _compute_softmax(scores):
     return probs
 
 
-
 from apex.multi_tensor_apply import multi_tensor_applier
+
+
 class GradientClipper:
     """
     Clips gradient norm of an iterable of parameters. 
     """
+
     def __init__(self, max_grad_norm):
         self.max_norm = max_grad_norm
         if multi_tensor_applier.available:
@@ -849,9 +855,16 @@ def main():
                         default=None,
                         type=str,
                         help="Location to cache train feaures. Will default to the dataset directory")
+    parser.add_argument("--json_summary",
+                        default=None,
+                        type=str,
+                        help="")
 
     args = parser.parse_args()
-    args.fp16 = args.fp16 or args.amp    
+    args.fp16 = args.fp16 or args.amp
+
+    set_environment_variables_for_nccl_backend()
+    update_args_from_aml_env(args)
 
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -861,17 +874,17 @@ def main():
         device = torch.device("cuda", args.local_rank)
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
-        n_gpu = 1
+        n_gpu = get_world_size()
 
     if is_main_process():
         dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
-                                                           filename=args.json_summary),
+                                                           filename=args.json_summary + "/dllogger.json"),
                                 dllogger.StdOutBackend(verbosity=dllogger.Verbosity.VERBOSE, step_format=format_step)])
     else:
         dllogger.init(backends=[])
-        
+
     print("device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
-                                device, n_gpu, bool(args.local_rank != -1), args.fp16))
+        device, n_gpu, bool(args.local_rank != -1), args.fp16))
 
     dllogger.log(step="PARAMETER", data={"Config": [str(args)]})
 
@@ -901,7 +914,7 @@ def main():
             raise ValueError(
                 "If `do_predict` is True, then `predict_file` must be specified.")
 
-    if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and os.listdir(args.output_dir)!=['logfile.txt']:
+    if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and os.listdir(args.output_dir) != ['logfile.txt']:
         print("WARNING: Output directory {} already exists and is not empty.".format(args.output_dir), os.listdir(args.output_dir))
     if not os.path.exists(args.output_dir) and is_main_process():
         os.makedirs(args.output_dir)
@@ -922,19 +935,23 @@ def main():
     # Prepare model
     config = modeling.BertConfig.from_json_file(args.config_file)
     # Padding for divisibility by 8
-    if config.vocab_size % 8 != 0:
-        config.vocab_size += 8 - (config.vocab_size % 8)
-
+    # if config.vocab_size % 8 != 0:
+    #     config.vocab_size += 8 - (config.vocab_size % 8)
     modeling.ACT2FN["bias_gelu"] = modeling.bias_gelu_training
     model = modeling.BertForQuestionAnswering(config)
     # model = modeling.BertForQuestionAnswering.from_pretrained(args.bert_model,
                 # cache_dir=os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank)))
     dllogger.log(step="PARAMETER", data={"loading_checkpoint": True})
-    model.load_state_dict(torch.load(args.init_checkpoint, map_location='cpu')["model"], strict=False)
+    state_dict = torch.load(args.init_checkpoint, map_location='cpu')
+    if "model" in state_dict:
+        model.load_state_dict(torch.load(args.init_checkpoint, map_location='cpu')["model"], strict=False)
+    else:
+        model.load_state_dict(torch.load(args.init_checkpoint, map_location='cpu'), strict=False)
     dllogger.log(step="PARAMETER", data={"loaded_checkpoint": True})
+
     model.to(device)
     num_weights = sum([p.numel() for p in model.parameters() if p.requires_grad])
-    dllogger.log(step="PARAMETER", data={"model_weights_num":num_weights})
+    dllogger.log(step="PARAMETER", data={"model_weights_num": num_weights})
 
     # Prepare optimizer
     param_optimizer = list(model.named_parameters())
@@ -961,7 +978,7 @@ def main():
 
             if args.loss_scale == 0:
                 model, optimizer = amp.initialize(model, optimizer, opt_level="O2", keep_batchnorm_fp32=False,
-                                                      loss_scale="dynamic")
+                                                  loss_scale="dynamic")
             else:
                 model, optimizer = amp.initialize(model, optimizer, opt_level="O2", keep_batchnorm_fp32=False, loss_scale=args.loss_scale)
             if args.do_train:
@@ -969,9 +986,9 @@ def main():
 
         else:
             optimizer = BertAdam(optimizer_grouped_parameters,
-                                    lr=args.learning_rate,
-                                    warmup=args.warmup_proportion,
-                                    t_total=num_train_optimization_steps)
+                                 lr=args.learning_rate,
+                                 warmup=args.warmup_proportion,
+                                 t_total=num_train_optimization_steps)
 
     if args.local_rank != -1:
         try:
@@ -1017,8 +1034,8 @@ def main():
         dllogger.log(step="PARAMETER", data={"train_start": True})
         dllogger.log(step="PARAMETER", data={"training_samples": len(train_examples)})
         dllogger.log(step="PARAMETER", data={"training_features": len(train_features)})
-        dllogger.log(step="PARAMETER", data={"train_batch_size":args.train_batch_size})
-        dllogger.log(step="PARAMETER", data={"steps":num_train_optimization_steps})
+        dllogger.log(step="PARAMETER", data={"train_batch_size": args.train_batch_size})
+        dllogger.log(step="PARAMETER", data={"steps": num_train_optimization_steps})
         all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
         all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
         all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
@@ -1040,12 +1057,11 @@ def main():
             train_iter = tqdm(train_dataloader, desc="Iteration", disable=args.disable_progress_bar) if is_main_process() else train_dataloader
             for step, batch in enumerate(train_iter):
                 # Terminate early for benchmarking
-                
+
                 if args.max_steps > 0 and global_step > args.max_steps:
                     break
 
-                if n_gpu == 1:
-                    batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
+                batch = tuple(t.to(device) for t in batch)
                 input_ids, input_mask, segment_ids, start_positions, end_positions = batch
                 start_logits, end_logits = model(input_ids, segment_ids, input_mask)
                 # If we are on multi-GPU, split add a dimension
@@ -1071,12 +1087,12 @@ def main():
                         scaled_loss.backward()
                 else:
                     loss.backward()
-                
+
                 # gradient clipping  
-                gradClipper.step(amp.master_params(optimizer))         
- 
+                gradClipper.step(amp.master_params(optimizer))
+
                 if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if args.fp16 :
+                    if args.fp16:
                         # modify learning rate with special warm up for BERT which FusedAdam doesn't do
                         scheduler.step()
                     optimizer.step()
@@ -1094,7 +1110,7 @@ def main():
         # Save a trained model and the associated configuration
         model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
         output_model_file = os.path.join(args.output_dir, modeling.WEIGHTS_NAME)
-        torch.save({"model":model_to_save.state_dict()}, output_model_file)
+        torch.save({"model": model_to_save.state_dict()}, output_model_file)
         output_config_file = os.path.join(args.output_dir, modeling.CONFIG_NAME)
         with open(output_config_file, 'w') as f:
             f.write(model_to_save.config.to_json_string())
@@ -1170,7 +1186,7 @@ def main():
             import sys
             import subprocess
             eval_out = subprocess.check_output([sys.executable, args.eval_script,
-                                              args.predict_file, args.output_dir + "/predictions.json"])
+                                                args.predict_file, args.output_dir + "/predictions.json"])
             scores = str(eval_out).strip()
             exact_match = float(scores.split(":")[1].split(",")[0])
             f1 = float(scores.split(":")[2].split("}")[0])
@@ -1187,13 +1203,14 @@ def main():
         else:
             dllogger.log(step=tuple(), data={"e2e_train_time": time_to_train,
                                              "training_sequences_per_second": args.train_batch_size * args.gradient_accumulation_steps \
-                                              * args.max_steps * gpu_count / time_to_train,
-                                              "final_loss": final_loss})
+                                                                              * args.max_steps * gpu_count / time_to_train,
+                                             "final_loss": final_loss})
     if args.do_predict and is_main_process():
         dllogger.log(step=tuple(), data={"e2e_inference_time": time_to_infer,
-                                                 "inference_sequences_per_second": len(eval_features) / time_to_infer})
+                                         "inference_sequences_per_second": len(eval_features) / time_to_infer})
     if args.do_eval and is_main_process():
         dllogger.log(step=tuple(), data={"exact_match": exact_match, "F1": f1})
+
 
 if __name__ == "__main__":
     main()
