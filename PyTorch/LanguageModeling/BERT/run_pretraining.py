@@ -340,6 +340,7 @@ def setup_training(args):
         args.allreduce_post_accumulation_fp16 = False
         
     if is_main_process():
+        os.makedirs(args.json_summary, exist_ok=True)
         dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
                                                            filename=args.json_summary + "/dllogger.json"),
                                 dllogger.StdOutBackend(verbosity=dllogger.Verbosity.VERBOSE, step_format=format_step)])

@@ -1,0 +1,50 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+code:
+  local_path: ../
+command: >
+  python run_pretraining.py \
+    --train_batch_size 64 \
+    --learning_rate 1.875e-4 \
+    --warmup_proportion 0.2843 \
+    --input_dir {inputs.input_dataset} \
+    --max_seq_length 128 \
+    --max_predictions_per_seq 20 \
+    --max_steps 450432 \
+    --num_steps_per_checkpoint 10000 \
+    --seed 42 \
+    --do_train \
+    --config_file bert_config.json \
+    --output_dir ./nvbert_pretrain/output_dir \
+    --json-summary ./nvbert_pretrain/dllogger \
+    --fp16 \
+    --allreduce_post_accumulation \
+    --gradient_accumulation_steps 1 \
+    --log_freq 100 \
+    --local_rank $AZ_BATCHAI_TASK_INDEX \
+    --deepspeed_config notebooks/deepspeedConfig.json \
+    --deepspeed
+
+inputs:
+  input_dataset:
+    data: <<REPLACE ME>>
+    mode: mount
+
+environment:
+  name: <<REPLACE ME>>
+  version: <<REPLACE ME>>
+  docker:
+    image: <<REPLACE ME>>
+
+#  docker:
+#    build:
+#      dockerfile: file:nvidia/dockers/nvbert.public.v0.0.1.ds/Dockerfile
+
+compute:
+  target: <<REPLACE ME>>
+  instance_count: 4
+
+distribution:
+  type: mpi
+  process_count_per_instance: 4
+
+experiment_name: nvbert-ds-0

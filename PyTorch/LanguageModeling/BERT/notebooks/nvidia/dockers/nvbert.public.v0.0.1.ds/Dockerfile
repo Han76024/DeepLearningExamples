@@ -31,12 +31,14 @@ RUN conda install -y pip=$PIP_INSTALL_VERSION
 # CMAKE
 # ------------------------------------------------------------------------------------------------ #
 
-ENV CMAKE_VERSION=3.16.4
-RUN cd /usr/local && \
-    wget -q -O - https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.tar.gz | tar zxf -
-ENV PATH=/usr/local/cmake-${CMAKE_VERSION}-Linux-x86_64/bin:${PATH}
+#ENV CMAKE_VERSION=3.20.3
+#RUN cd /usr/local && \
+#    wget -q -O - https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.tar.gz | tar zxf -
+#ENV PATH=/usr/local/cmake-${CMAKE_VERSION}-Linux-x86_64/bin:${PATH}
+#
+#WORKDIR /workspace
 
-WORKDIR /workspace
+#RUN conda install cmake
 
 # ------------------------------------------------------------------------------------------------ #
 # PyTorch
@@ -62,6 +64,9 @@ RUN pip install --no-cache-dir \
     pyarrow \
     py-lz4framed \
     transformers \
+    datasets \
+    pytorch-lightning \
+    h5py \
     methodtools \
     langid \
     toolz \
