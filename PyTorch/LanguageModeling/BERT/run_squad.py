@@ -877,6 +877,7 @@ def main():
         n_gpu = get_world_size()
 
     if is_main_process():
+        os.makedirs(args.json_summary, exist_ok=True)
         dllogger.init(backends=[dllogger.JSONStreamBackend(verbosity=dllogger.Verbosity.VERBOSE,
                                                            filename=args.json_summary + "/dllogger.json"),
                                 dllogger.StdOutBackend(verbosity=dllogger.Verbosity.VERBOSE, step_format=format_step)])

@@ -1,0 +1,49 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+code:
+  local_path: ../
+
+command: >
+  python run_squad.py \
+    --do_train \
+    --train_file {inputs.input_dataset}/train-v1.1.json \
+    --train_batch_size 8 \
+    --gradient_accumulation_steps 4 \
+    --do_predict \
+    --predict_file {inputs.input_dataset}/dev-v1.1.json \
+    --predict_batch_size 2 \
+    --eval_script {inputs.input_dataset}/evaluate-v1.1.py \
+    --do_eval \
+    --do_lower_case \
+    --bert_model bert-base-uncased \
+    --learning_rate 3e-5 \
+    --seed 42 \
+    --num_train_epochs 8 \
+    --max_seq_length 384 \
+    --doc_stride 128 \
+    --output_dir ./nvbert_squad/output_dir  \
+    --json_summary ./nvbert_squad/dllog \
+    --vocab_file {inputs.input_dataset}/bert-base-uncased-vocab.txt \
+    --config_file data/squad/bert_config.json \
+    --init_checkpoint {inputs.input_dataset}/pytorch_model.bin \
+    --fp16 \
+    --skip_cache
+
+inputs:
+  input_dataset:
+    data: azureml:<<REPLACE ME>>
+    mode: mount
+
+environment:
+  docker:
+    build:
+      dockerfile: file:nvidia/dockers/nvbert.public.v0.0.1.ds/Dockerfile
+
+compute:
+  target: <<REPLACE ME>>
+  instance_count: 4
+
+distribution:
+  type: mpi
+  process_count_per_instance: 4
+
+experiment_name: nvbert-squad-0
